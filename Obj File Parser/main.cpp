@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <vector>
 
 using namespace std;
 
@@ -16,21 +17,27 @@ typedef struct {
 	int nIndex1, nIndex2, nIndex3;
 }FaceType;
 
+typedef struct {
+	int vIndex;
+	int tIndex;
+	int nIndex;
+}FaceElementType;
+
 void GetModelFilename(char*);
-bool ReadFileCounts(char*, int&, int&, int&, int&);
-bool LoadDataStructures(char*, int, int, int, int);
+bool ReadFileCounts(char*, int&, int&, int&, int&, vector<int>&);
+bool LoadDataStructures(char*, int, int, int, int, vector<int>);
 
 int main() {
 	bool result;
 	char filename[256];
 	int vertexCount, textureCount, normalCount, faceCount;
+	vector<int> vertexPerFace;
 	char garbage;
 
 	GetModelFilename(filename);
 
-	result = ReadFileCounts(filename, vertexCount, textureCount, normalCount, faceCount);
+	result = ReadFileCounts(filename, vertexCount, textureCount, normalCount, faceCount, vertexPerFace);
 	if (!result) {
-		cout << "ReadFileCounts() Error" << endl;
 		return -1;
 	}
 
@@ -40,9 +47,8 @@ int main() {
 	cout << "Normals :	" << normalCount << endl;
 	cout << "Faces :	" << faceCount << endl;
 
-	result = LoadDataStructures(filename, vertexCount, textureCount, normalCount, faceCount);
+	result = LoadDataStructures(filename, vertexCount, textureCount, normalCount, faceCount, vertexPerFace);
 	if (!result) {
-		cout << "LoadDatgaStructures" << endl;
 		return -1;
 	}
 
@@ -80,7 +86,7 @@ void GetModelFilename(char* filename) {
 }
 
 
-bool ReadFileCounts(char* filename, int& vertexCount, int& textureCount, int& normalCount, int& faceCount) {
+bool ReadFileCounts(char* filename, int& vertexCount, int& textureCount, int& normalCount, int& faceCount, vector<int>& vertexPerFace) {
 	ifstream fin;
 	char input;
 
@@ -88,6 +94,9 @@ bool ReadFileCounts(char* filename, int& vertexCount, int& textureCount, int& no
 	textureCount = 0;
 	normalCount = 0;
 	faceCount = 0;
+	vertexPerFace.clear();
+	
+	int vertexPerFaceCnt = 0;
 
 	fin.open(filename);
 
@@ -95,6 +104,7 @@ bool ReadFileCounts(char* filename, int& vertexCount, int& textureCount, int& no
 		return false;
 
 	fin.get(input);
+	//eof()는 파일의 끝인지 여부를 반환하는 함수
 	while (!fin.eof()) {
 		if (input == 'v') {
 			fin.get(input);
@@ -102,9 +112,30 @@ bool ReadFileCounts(char* filename, int& vertexCount, int& textureCount, int& no
 			if (input == 't') { textureCount++; }
 			if (input == 'n') { normalCount++; }
 		}
+
+		// 파일이 face 정보를 읽을 때
 		if (input == 'f') {
 			fin.get(input);
-			if (input == ' ') { faceCount++; }
+			// face 정보 부분이 맞을 경우
+			if (input == ' ') { 
+
+				// face 하나의 vertex 갯수를 확인
+				while (input != '\n') {
+					fin.get(input);
+					if (input == ' ') {
+						vertexPerFaceCnt++;
+					}
+				}
+				vertexPerFaceCnt++;
+				//vertexPerFace 리스트에 face별 vertex 수를 저장한다.
+				vertexPerFace.push_back(vertexPerFaceCnt);
+
+				// face 갯수를 추가
+				// face 당 vertex 갯수가 3을 초과하면 face를 삼각형으로 분할
+				faceCount+= 1+(vertexPerFaceCnt-3);
+			}
+			// 
+			vertexPerFaceCnt = 0;
 		}
 
 		while (input != '\n') {
@@ -120,7 +151,7 @@ bool ReadFileCounts(char* filename, int& vertexCount, int& textureCount, int& no
 }
 
 
-bool LoadDataStructures(char* filename, int vertexCount, int textureCount, int normalCount, int faceCount) {
+bool LoadDataStructures(char* filename, int vertexCount, int textureCount, int normalCount, int faceCount, vector<int> vertexPerFace) {
 	VertexType* vertices, * texcoords, * normals;
 	FaceType* faces;
 	ifstream fin;
@@ -191,12 +222,34 @@ bool LoadDataStructures(char* filename, int vertexCount, int textureCount, int n
 
 		if (input == 'f') {
 			fin.get(input);
-			if (input == ' ') {
-				fin >> faces[faceIndex].vIndex3 >> input2 >> faces[faceIndex].tIndex3 >> input2 >> faces[faceIndex].nIndex3
-					>> faces[faceIndex].vIndex2 >> input2 >> faces[faceIndex].tIndex2 >> input2 >> faces[faceIndex].nIndex2
-					>> faces[faceIndex].vIndex1 >> input2 >> faces[faceIndex].tIndex1 >> input2 >> faces[faceIndex].nIndex1;
-				faceIndex++;
-			}
+				if (input == ' ') {
+					int excessedvertex = 0;
+					vector<FaceElementType> vecFace;
+					vecFace.clear();
+					FaceElementType face;
+					while (input != '\n') {
+						if (input == ' ') {
+							fin >> face.vIndex >> input2 >> face.tIndex >> input2 >> face.nIndex;
+							vecFace.push_back(face);
+						}
+						fin.get(input);
+					}
+					excessedvertex = vecFace.size() - 3;
+					for (int i = 0; i <= excessedvertex; i++) {
+						faces[faceIndex].vIndex3 = vecFace[0].vIndex;
+						faces[faceIndex].vIndex2 = vecFace[1 + i].vIndex;
+						faces[faceIndex].vIndex1 = vecFace[2 + i].vIndex;
+
+						faces[faceIndex].tIndex3 = vecFace[0].tIndex;
+						faces[faceIndex].tIndex2 = vecFace[1 + i].tIndex;
+						faces[faceIndex].tIndex1 = vecFace[2 + i].tIndex;
+
+						faces[faceIndex].nIndex3 = vecFace[0].nIndex;
+						faces[faceIndex].nIndex2 = vecFace[1 + i].nIndex;
+						faces[faceIndex].nIndex1 = vecFace[2 + i].nIndex;
+						faceIndex++;
+					}
+				}
 		}
 
 		while (input != '\n') {
